@@ -33,6 +33,12 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#35B979"
+        }
       ]
     ],
     "experiments": {
@@ -44,6 +50,12 @@
       "eas": {
         "projectId": "b2391060-6438-40fa-88de-726548b87080"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/b2391060-6438-40fa-88de-726548b87080"
     }
   }
 }

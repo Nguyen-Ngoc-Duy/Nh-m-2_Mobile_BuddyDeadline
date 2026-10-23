@@ -4,27 +4,20 @@ import {
   StyleSheet,
   Text,
   useWindowDimensions,
-  View
+  View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function Index() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
 
-  const logoSize = Math.min(width * 0.28, 110);
-  
+  const logoSize = Math.min(width * 0.32, 130);
+
   return (
     <View style={styles.container}>
-
-      <View
-        style={[
-          styles.content,
-          {
-            paddingTop: height * 0.10,
-          },
-        ]}
-      >
-
+      <View style={[styles.content, { paddingTop: insets.top + height * 0.12 }]}>
         <View
           style={[
             styles.logoBox,
@@ -38,77 +31,46 @@ export default function Index() {
           <Text style={styles.logo}>📅</Text>
         </View>
 
-        <Text style={styles.title}>
-          Deadline Buddy
-        </Text>
-
+        <Text style={styles.title}>Deadline Buddy</Text>
         <Text style={styles.subtitle}>
           Quản lý deadline, chủ động tương lai
         </Text>
-
       </View>
 
       <Pressable
-        style={styles.startButton}
+        style={[styles.startButton, { bottom: 28 + insets.bottom }]}
         onPress={() => router.push('/explore')}
       >
-        <Text style={styles.startText}>
-          Bắt đầu
-        </Text>
+        <Text style={styles.startText}>Bắt đầu</Text>
       </Pressable>
-
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F4FBF8',
-  },
-
-  content: {
-    alignItems: 'center',
-  },
+  container: { flex: 1, backgroundColor: '#F4FBF8' },
+  content: { alignItems: 'center' },
 
   logoBox: {
     backgroundColor: '#D9F2E8',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 18,
+    marginBottom: 20,
   },
+  logo: { fontSize: 52 },
 
-  logo: {
-    fontSize: 45,
-  },
-
-  title: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#245747',
-  },
-
-  subtitle: {
-    marginTop: 5,
-    fontSize: 11,
-    color: '#5EAA92',
-  },
+  title: { fontSize: 26, fontWeight: '700', color: '#245747' },
+  subtitle: { marginTop: 6, fontSize: 14, color: '#5EAA92' },
 
   startButton: {
     position: 'absolute',
-    bottom: 28,
     left: 28,
     right: 28,
-    height: 48,
-    borderRadius: 9,
+    height: 54,
+    borderRadius: 14,
     backgroundColor: '#35B979',
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  startText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
-  },
+  startText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
 });

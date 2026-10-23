@@ -1,18 +1,14 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { notify } from '@/lib/notify';
 import { supabase } from '@/lib/supabase';
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
@@ -37,9 +33,9 @@ export default function ResetPasswordScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.content}>
-        <Pressable onPress={() => router.back()}>
+        <Pressable onPress={() => router.back()} style={styles.backButton}>
           <Text style={styles.back}>←</Text>
         </Pressable>
 
@@ -56,6 +52,7 @@ export default function ResetPasswordScreen() {
           value={email}
           onChangeText={setEmail}
           autoCapitalize="none"
+          autoCorrect={false}
           keyboardType="email-address"
         />
 
@@ -74,59 +71,46 @@ export default function ResetPasswordScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F4FBF8',
-  },
+  container: { flex: 1, backgroundColor: '#F4FBF8' },
+  content: { paddingHorizontal: 24, paddingTop: 12 },
 
-  content: {
-    padding: 24,
-    paddingTop: 35,
-  },
-
-  back: {
-    fontSize: 28,
-    color: '#245747',
-    marginBottom: 15,
-  },
+  backButton: { width: 44, height: 44, justifyContent: 'center' },
+  back: { fontSize: 30, color: '#245747' },
 
   title: {
     textAlign: 'center',
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: '700',
     color: '#245747',
+    marginTop: 4,
   },
-
   subtitle: {
     textAlign: 'center',
-    marginTop: 6,
+    marginTop: 8,
     marginBottom: 30,
     color: '#65AA96',
-    fontSize: 12,
+    fontSize: 14,
   },
 
   input: {
-    height: 44,
+    height: 50,
     borderWidth: 1,
     borderColor: '#B9E5D5',
-    borderRadius: 9,
+    borderRadius: 12,
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 16,
-    marginBottom: 13,
+    marginBottom: 14,
+    fontSize: 15,
     color: '#245747',
   },
 
   button: {
-    height: 44,
+    height: 52,
     backgroundColor: '#35B979',
-    borderRadius: 9,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: 8,
   },
-
-  buttonText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
+  buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
 });

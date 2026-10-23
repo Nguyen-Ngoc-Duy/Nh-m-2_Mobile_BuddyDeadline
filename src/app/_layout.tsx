@@ -1,7 +1,7 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
-
+import { setupNotifications } from '@/lib/reminders';
 import { supabase } from '@/lib/supabase';
 
 // Các màn hình không cần đăng nhập
@@ -19,14 +19,17 @@ export default function RootLayout() {
       setSession(data.session);
       setReady(true);
     });
-
+  
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
     });
 
     return () => sub.subscription.unsubscribe();
   }, []);
-
+  
+  useEffect(() => {
+    setupNotifications();
+  }, []);
   // Chuyển hướng theo trạng thái đăng nhập
   useEffect(() => {
     if (!ready) return;

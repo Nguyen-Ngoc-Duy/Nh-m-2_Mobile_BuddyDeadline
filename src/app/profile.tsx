@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
@@ -12,17 +13,21 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { confirmAction, notify } from '@/lib/notify';
+import { rescheduleAll, setupNotifications } from '@/lib/reminders';
 import { supabase } from '@/lib/supabase';
 import {
   addCategory as addCategoryRemote,
   listCategories,
   removeCategory,
 } from '@/storage/categories';
+import { listDeadlines } from '@/storage/deadlines';
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -73,7 +78,6 @@ export default function ProfileScreen() {
     }, [loadProfile])
   );
 
-  // Chỉ cho đổi tên (đổi email cần xác nhận lại qua Supabase)
   const saveProfile = async () => {
     const trimmedName = editName.trim();
 
@@ -133,10 +137,7 @@ export default function ProfileScreen() {
     );
   };
 
-  const saveNotificationSettings = async (
-    enabled: boolean,
-    reminder: string
-  ) => {
+  const saveNotificationSettings = async (enabled: boolean, reminder: string) => {
     try {
       await AsyncStorage.multiSet([
         ['notification_enabled', String(enabled)],
@@ -144,35 +145,73 @@ export default function ProfileScreen() {
       ]);
       setNotificationEnabled(enabled);
       setRemindBefore(reminder);
+
+      // Áp dụng ngay: đặt lại (hoặc hủy) toàn bộ lịch nhắc
+      rescheduleAll(await listDeadlines()).catch(console.error);
     } catch {
       notify('Lỗi', 'Không thể lưu cài đặt thông báo.');
+    }
+  };
+
+  // Thông báo thử sau 5 giây để kiểm tra rung và âm thanh
+  const testNotification = async () => {
+    if (Platform.OS === 'web') {
+      notify('Thông báo', 'Thông báo chỉ hoạt động trên ứng dụng điện thoại.');
+      return;
+    }
+
+    try {
+      const granted = await setupNotifications();
+      if (!granted) {
+        notify(
+          'Chưa có quyền',
+          'Hãy bật quyền thông báo cho ứng dụng trong Cài đặt của điện thoại.'
+        );
+        return;
+      }
+
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: '⏰ Thông báo thử',
+          body: 'Điện thoại có rung và phát âm thanh không?',
+          sound: 'default',
+          vibrate: [0, 400, 250, 400],
+          priority: Notifications.AndroidNotificationPriority.MAX,
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+          seconds: 5,
+          channelId: 'deadline-reminders',
+        },
+      });
+
+      notify('Đã đặt thử', 'Hãy khóa màn hình hoặc thoát app, thông báo sẽ đến sau 5 giây.');
+    } catch (error: any) {
+      notify('Lỗi', error?.message ?? 'Không thể gửi thông báo thử.');
     }
   };
 
   const logout = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) notify('Lỗi', 'Không thể đăng xuất. Vui lòng thử lại.');
-    // _layout tự đưa về màn đăng nhập
-  };
-
-  const goTo = (path: '/home' | '/deadlines' | '/add-deadline') => {
-    router.push(path);
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: 90 + insets.bottom },
+          ]}
           keyboardShouldPersistTaps="handled"
         >
           <Text style={styles.pageTitle}>Cá nhân</Text>
 
-          {/* THÔNG TIN TÀI KHOẢN */}
           <View style={styles.profileCard}>
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>
@@ -238,7 +277,7 @@ export default function ProfileScreen() {
             </View>
           )}
 
-          {/* QUẢN LÝ DANH MỤC */}
+          {/* DANH MỤC */}
           <Pressable
             style={styles.menuItem}
             onPress={() => setShowCategories(!showCategories)}
@@ -258,7 +297,6 @@ export default function ProfileScreen() {
 
                   <Pressable
                     onPress={() => deleteCategory(category)}
-                    accessibilityRole="button"
                     accessibilityLabel={`Xóa ${category}`}
                   >
                     <Text style={styles.deleteText}>Xóa</Text>
@@ -267,7 +305,7 @@ export default function ProfileScreen() {
               ))}
 
               <TextInput
-                style={[styles.input, { marginTop: 10 }]}
+                style={[styles.input, { marginTop: 12 }]}
                 placeholder="Tên danh mục mới"
                 placeholderTextColor="#8AA99B"
                 value={newCategory}
@@ -281,7 +319,7 @@ export default function ProfileScreen() {
             </View>
           )}
 
-          {/* CÀI ĐẶT THÔNG BÁO */}
+          {/* THÔNG BÁO */}
           <Pressable
             style={styles.menuItem}
             onPress={() => setShowNotifications(!showNotifications)}
@@ -297,7 +335,7 @@ export default function ProfileScreen() {
                 <View style={styles.switchInfo}>
                   <Text style={styles.sectionHeading}>Nhắc nhở deadline</Text>
                   <Text style={styles.helperText}>
-                    Bật hoặc tắt tùy chọn nhắc nhở
+                    Điện thoại sẽ rung và phát âm thanh khi gần đến hạn
                   </Text>
                 </View>
 
@@ -311,7 +349,7 @@ export default function ProfileScreen() {
                 />
               </View>
 
-              <Text style={styles.label}>Nhắc trước thời hạn</Text>
+              <Text style={styles.label}>Nhắc trước thời hạn (mặc định)</Text>
 
               {['10 phút', '30 phút', '1 giờ', '1 ngày'].map(option => (
                 <Pressable
@@ -333,9 +371,15 @@ export default function ProfileScreen() {
                 </Pressable>
               ))}
 
+              <Pressable style={styles.testButton} onPress={testNotification}>
+                <Text style={styles.testText}>🔔 Thử thông báo (sau 5 giây)</Text>
+              </Pressable>
+
               <Text style={styles.helperText}>
-                Lưu ý: Đây là cài đặt tùy chọn. Để nhận thông báo thực tế, ứng
-                dụng cần tích hợp thêm hệ thống gửi thông báo.
+                Mỗi deadline nhắc trước hạn theo thời gian bạn ghi ở ô "Nhắc
+                nhở" (ví dụ "15 phút trước"). Nếu để trống sẽ dùng mức mặc
+                định ở trên, và nhắc thêm một lần đúng giờ hạn. Thông báo chỉ
+                hoạt động trên ứng dụng điện thoại (APK).
               </Text>
             </View>
           )}
@@ -349,20 +393,21 @@ export default function ProfileScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* THANH ĐIỀU HƯỚNG */}
-      <View style={styles.bottomNav}>
+      <View
+        style={[
+          styles.bottomNav,
+          { height: 62 + insets.bottom, paddingBottom: insets.bottom },
+        ]}
+      >
         <Pressable style={styles.navItem} onPress={() => router.replace('/home')}>
           <Text style={styles.navIcon}>⌂</Text>
         </Pressable>
-
-        <Pressable style={styles.navItem} onPress={() => goTo('/deadlines')}>
+        <Pressable style={styles.navItem} onPress={() => router.push('/deadlines')}>
           <Text style={styles.navIcon}>☰</Text>
         </Pressable>
-
-        <Pressable style={styles.navItem} onPress={() => goTo('/add-deadline')}>
+        <Pressable style={styles.navItem} onPress={() => router.push('/add-deadline')}>
           <Text style={styles.navIcon}>⊞</Text>
         </Pressable>
-
         <View style={[styles.navItem, styles.navActive]}>
           <Text style={[styles.navIcon, styles.navIconActive]}>♙</Text>
         </View>
@@ -373,21 +418,12 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-
-  container: {
-    flex: 1,
-    backgroundColor: '#F4FBF8',
-  },
-
-  scrollContent: {
-    paddingHorizontal: 14,
-    paddingTop: 25,
-    paddingBottom: 85,
-  },
+  container: { flex: 1, backgroundColor: '#F4FBF8' },
+  scrollContent: { paddingHorizontal: 16, paddingTop: 18 },
 
   pageTitle: {
     textAlign: 'center',
-    fontSize: 17,
+    fontSize: 20,
     fontWeight: '700',
     color: '#245747',
     marginBottom: 20,
@@ -399,159 +435,105 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#B9E5D5',
-    borderRadius: 11,
-    padding: 12,
-    marginBottom: 10,
-    gap: 12,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+    gap: 14,
   },
-
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: '#B9E5D5',
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  avatarText: {
-    fontSize: 23,
-    fontWeight: '700',
-    color: '#245747',
-  },
-
+  avatarText: { fontSize: 26, fontWeight: '700', color: '#245747' },
   profileInfo: { flex: 1 },
-
-  profileName: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#245747',
-  },
-
-  profileEmail: {
-    fontSize: 10,
-    color: '#84928E',
-    marginTop: 4,
-  },
+  profileName: { fontSize: 16, fontWeight: '700', color: '#245747' },
+  profileEmail: { fontSize: 13, color: '#84928E', marginTop: 4 },
 
   menuItem: {
-    minHeight: 39,
+    minHeight: 52,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#B9E5D5',
-    borderRadius: 9,
-    paddingHorizontal: 10,
-    marginBottom: 7,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    marginBottom: 9,
   },
-
-  menuIcon: {
-    width: 26,
-    fontSize: 15,
-    color: '#245747',
-  },
-
-  menuText: {
-    flex: 1,
-    fontSize: 11,
-    color: '#31594C',
-  },
-
-  chevron: {
-    fontSize: 17,
-    color: '#568878',
-    paddingHorizontal: 3,
-  },
+  menuIcon: { width: 32, fontSize: 18, color: '#245747' },
+  menuText: { flex: 1, fontSize: 15, color: '#31594C' },
+  chevron: { fontSize: 20, color: '#568878', paddingHorizontal: 4 },
 
   expandedCard: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#B9E5D5',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 9,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 11,
   },
-
-  label: {
-    fontSize: 11,
-    color: '#31594C',
-    marginTop: 8,
-    marginBottom: 6,
-  },
-
+  label: { fontSize: 13, color: '#31594C', marginTop: 8, marginBottom: 6 },
   input: {
-    minHeight: 40,
+    minHeight: 46,
     borderWidth: 1,
     borderColor: '#B9E5D5',
-    borderRadius: 8,
-    paddingHorizontal: 12,
+    borderRadius: 10,
+    paddingHorizontal: 14,
     color: '#245747',
     backgroundColor: '#FFFFFF',
-    marginBottom: 9,
-    fontSize: 12,
+    marginBottom: 10,
+    fontSize: 15,
   },
 
-  actionRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 4,
-  },
-
+  actionRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
   primaryButton: {
-    minHeight: 38,
-    paddingHorizontal: 13,
+    minHeight: 46,
+    paddingHorizontal: 16,
     backgroundColor: '#35B979',
-    borderRadius: 8,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  primaryText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-
+  primaryText: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
   cancelButton: {
-    minHeight: 38,
-    paddingHorizontal: 15,
+    minHeight: 46,
+    paddingHorizontal: 18,
     backgroundColor: '#EDF5F1',
-    borderRadius: 8,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  cancelText: { fontSize: 14, color: '#568878' },
 
-  cancelText: {
-    fontSize: 11,
-    color: '#568878',
+  testButton: {
+    minHeight: 46,
+    marginTop: 14,
+    backgroundColor: '#E4F7ED',
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  testText: { fontSize: 14, fontWeight: '600', color: '#20875B' },
 
-  sectionHeading: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#245747',
-  },
-
+  sectionHeading: { fontSize: 15, fontWeight: '600', color: '#245747' },
   categoryRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 10,
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#EDF5F1',
   },
-
-  categoryText: {
-    fontSize: 12,
-    color: '#31594C',
-  },
-
+  categoryText: { fontSize: 15, color: '#31594C' },
   deleteText: {
-    fontSize: 11,
+    fontSize: 14,
     color: '#E53935',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
   },
 
   switchRow: {
@@ -560,41 +542,21 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
-
   switchInfo: { flex: 1 },
-
-  helperText: {
-    fontSize: 10,
-    color: '#84928E',
-    marginTop: 5,
-    lineHeight: 15,
-  },
-
+  helperText: { fontSize: 12, color: '#84928E', marginTop: 8, lineHeight: 18 },
   optionRow: {
+    minHeight: 46,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#EDF5F1',
   },
-
-  optionText: {
-    fontSize: 12,
-    color: '#31594C',
-  },
-
-  radio: {
-    fontSize: 17,
-    color: '#AAB9B1',
-  },
-
-  radioSelected: {
-    color: '#35B979',
-  },
+  optionText: { fontSize: 15, color: '#31594C' },
+  radio: { fontSize: 20, color: '#AAB9B1' },
+  radioSelected: { color: '#35B979' },
 
   bottomNav: {
-    height: 58,
     position: 'absolute',
     bottom: 0,
     left: 0,
@@ -603,27 +565,15 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#E5EEE9',
     flexDirection: 'row',
-    justifyContent: 'space-around',
     alignItems: 'center',
   },
-
   navItem: {
     flex: 1,
-    height: 58,
+    height: 62,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  navActive: {
-    backgroundColor: '#F0FAF5',
-  },
-
-  navIcon: {
-    fontSize: 24,
-    color: '#4D9D7D',
-  },
-
-  navIconActive: {
-    color: '#35B979',
-  },
+  navActive: { backgroundColor: '#F0FAF5' },
+  navIcon: { fontSize: 28, color: '#4D9D7D' },
+  navIconActive: { color: '#35B979' },
 });

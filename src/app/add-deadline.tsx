@@ -8,7 +8,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { WheelPicker } from '@/components/wheel-picker';
 import { notify } from '@/lib/notify';
 import { listCategories } from '@/storage/categories';
 import { addDeadline, getDeadline, updateDeadline } from '@/storage/deadlines';
@@ -22,6 +24,15 @@ const MONTHS = [
 ];
 
 const DEFAULT_CATEGORIES = ['Học tập', 'Công việc', 'Cá nhân', 'Gia đình'];
+
+// Nhắc nhở
+const PRESET_REMINDERS = ['Không', '5 phút', '10 phút', '30 phút', '1 giờ', '1 ngày'];
+const CUSTOM = 'Tùy chỉnh';
+const UNITS = ['phút', 'giờ', 'ngày'];
+
+// Chọn giờ (thanh xoay)
+const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
 
 function dateString(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -43,8 +54,26 @@ function validDate(value: string) {
   );
 }
 
+// Đọc giá trị nhắc nhở đã lưu ("10 phút trước", "Không", "45 phút trước"...)
+function parseStoredReminder(value: string): {
+  choice: string;
+  amount: string;
+  unit: string;
+} {
+  const v = (value || '').replace(/\s*trước\s*$/i, '').trim();
+
+  if (!v || v === 'Không') return { choice: 'Không', amount: '', unit: 'phút' };
+  if (PRESET_REMINDERS.includes(v)) return { choice: v, amount: '', unit: 'phút' };
+
+  const m = v.match(/^(\d+)\s*(phút|giờ|ngày)$/i);
+  if (m) return { choice: CUSTOM, amount: m[1], unit: m[2].toLowerCase() };
+
+  return { choice: 'Không', amount: '', unit: 'phút' };
+}
+
 export default function AddDeadlineScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ id?: string }>();
 
   const editId = Array.isArray(params.id) ? params.id[0] : params.id;
@@ -58,11 +87,15 @@ export default function AddDeadlineScreen() {
   const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
   const [category, setCategory] = useState('Học tập');
   const [priority, setPriority] = useState('Cao');
-  const [reminder, setReminder] = useState('');
+
+  const [reminderChoice, setReminderChoice] = useState('30 phút');
+  const [customAmount, setCustomAmount] = useState('');
+  const [customUnit, setCustomUnit] = useState('phút');
 
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [timeOpen, setTimeOpen] = useState(false);
   const [loading, setLoading] = useState(Boolean(editId));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -82,7 +115,7 @@ export default function AddDeadlineScreen() {
 
       if (active) {
         setCategories(cats);
-        setCategory((current) => (cats.includes(current) ? current : cats[0]));
+        setCategory(current => (cats.includes(current) ? current : cats[0]));
       }
 
       if (!editId) {
@@ -92,7 +125,6 @@ export default function AddDeadlineScreen() {
 
       try {
         const item = await getDeadline(editId);
-
         if (!active) return;
 
         if (!item) {
@@ -105,9 +137,12 @@ export default function AddDeadlineScreen() {
         setTime(item.time || '18:00');
         setCategory(item.category || cats[0]);
         setPriority(item.priority || 'Cao');
-        setReminder(item.reminder === 'Không' ? '' : item.reminder || '');
 
-        // Nếu danh mục cũ không còn trong danh sách thì vẫn hiển thị được
+        const parsed = parseStoredReminder(item.reminder);
+        setReminderChoice(parsed.choice);
+        setCustomAmount(parsed.amount);
+        setCustomUnit(parsed.unit);
+
         if (item.category && !cats.includes(item.category)) {
           setCategories([...cats, item.category]);
         }
@@ -126,11 +161,24 @@ export default function AddDeadlineScreen() {
     }
 
     loadAll();
-
     return () => {
       active = false;
     };
   }, [editId]);
+
+  const [curHour, curMinute] = /^\d{2}:\d{2}$/.test(time)
+    ? time.split(':')
+    : ['18', '00'];
+
+  function pickHour(h: string) {
+    setTime(`${h}:${curMinute}`);
+    setError('');
+  }
+
+  function pickMinute(m: string) {
+    setTime(`${curHour}:${m}`);
+    setError('');
+  }
 
   function changeMonth(delta: number) {
     const next = new Date(year, month + delta, 1);
@@ -188,6 +236,19 @@ export default function AddDeadlineScreen() {
     );
   }
 
+  // Tạo chuỗi nhắc nhở để lưu vào database
+  function buildReminder(): string | null {
+    if (reminderChoice === 'Không') return 'Không';
+
+    if (reminderChoice === CUSTOM) {
+      const n = Number(customAmount);
+      if (!customAmount.trim() || !Number.isInteger(n) || n <= 0) return null;
+      return `${n} ${customUnit} trước`;
+    }
+
+    return `${reminderChoice} trước`;
+  }
+
   async function saveDeadline() {
     if (saving) return;
 
@@ -195,14 +256,18 @@ export default function AddDeadlineScreen() {
       setError('Vui lòng nhập tên deadline.');
       return;
     }
-
     if (!validDate(date)) {
       setError('Vui lòng chọn ngày hạn hợp lệ.');
       return;
     }
-
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time.trim())) {
-      setError('Giờ phải theo dạng HH:MM, ví dụ 18:00.');
+      setError('Vui lòng chọn giờ hợp lệ.');
+      return;
+    }
+
+    const reminderValue = buildReminder();
+    if (reminderValue === null) {
+      setError('Nhắc nhở tùy chỉnh: hãy nhập một số nguyên lớn hơn 0.');
       return;
     }
 
@@ -216,7 +281,7 @@ export default function AddDeadlineScreen() {
         time: time.trim(),
         category: category || 'Học tập',
         priority,
-        reminder: reminder.trim() || 'Không',
+        reminder: reminderValue,
       };
 
       if (isEditing && editId) {
@@ -247,9 +312,12 @@ export default function AddDeadlineScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: 36 + insets.bottom },
+        ]}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.header}>
@@ -263,7 +331,6 @@ export default function AddDeadlineScreen() {
         </View>
 
         <Text style={styles.label}>Tên deadline</Text>
-
         <TextInput
           style={styles.input}
           placeholder="Nhập tên deadline"
@@ -272,10 +339,10 @@ export default function AddDeadlineScreen() {
           onChangeText={setTitle}
         />
 
+        {/* NGÀY + GIỜ */}
         <View style={styles.row}>
           <View style={{ flex: 1 }}>
             <Text style={styles.label}>Ngày hạn</Text>
-
             <Pressable
               style={styles.dateButton}
               onPress={() => {
@@ -284,6 +351,7 @@ export default function AddDeadlineScreen() {
                   setYear(p[0]);
                   setMonth(p[1] - 1);
                 }
+                setTimeOpen(false);
                 setCalendarOpen(!calendarOpen);
               }}
             >
@@ -292,17 +360,18 @@ export default function AddDeadlineScreen() {
             </Pressable>
           </View>
 
-          <View style={{ width: 105 }}>
+          <View style={{ width: 130 }}>
             <Text style={styles.label}>Giờ đến hạn</Text>
-
-            <TextInput
-              style={styles.input}
-              value={time}
-              onChangeText={setTime}
-              placeholder="18:00"
-              placeholderTextColor="#7FAF9F"
-              maxLength={5}
-            />
+            <Pressable
+              style={styles.dateButton}
+              onPress={() => {
+                setCalendarOpen(false);
+                setTimeOpen(!timeOpen);
+              }}
+            >
+              <Text style={styles.dateButtonText}>{time}</Text>
+              <Text style={styles.calendarIcon}>◷</Text>
+            </Pressable>
           </View>
         </View>
 
@@ -323,7 +392,7 @@ export default function AddDeadlineScreen() {
             </View>
 
             <View style={styles.weekRow}>
-              {WEEKDAYS.map((day) => (
+              {WEEKDAYS.map(day => (
                 <Text key={day} style={styles.weekday}>
                   {day}
                 </Text>
@@ -347,10 +416,24 @@ export default function AddDeadlineScreen() {
           </View>
         )}
 
-        <Text style={styles.label}>Danh mục</Text>
+        {timeOpen && (
+          <View style={styles.calendar}>
+            <View style={styles.wheelRow}>
+              <WheelPicker items={HOURS} value={curHour} onChange={pickHour} />
+              <Text style={styles.wheelColon}>:</Text>
+              <WheelPicker items={MINUTES} value={curMinute} onChange={pickMinute} />
+            </View>
 
+            <Pressable style={styles.todayButton} onPress={() => setTimeOpen(false)}>
+              <Text style={styles.todayText}>Xong ({time})</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* DANH MỤC */}
+        <Text style={styles.label}>Danh mục</Text>
         <View style={styles.categoryRow}>
-          {categories.map((item) => (
+          {categories.map(item => (
             <Pressable
               key={item}
               onPress={() => {
@@ -374,10 +457,10 @@ export default function AddDeadlineScreen() {
           ))}
         </View>
 
+        {/* ƯU TIÊN */}
         <Text style={styles.label}>Mức ưu tiên</Text>
-
         <View style={styles.priorityRow}>
-          {['Cao', 'Trung bình', 'Thấp'].map((item) => (
+          {['Cao', 'Trung bình', 'Thấp'].map(item => (
             <Pressable
               key={item}
               onPress={() => setPriority(item)}
@@ -398,15 +481,78 @@ export default function AddDeadlineScreen() {
           ))}
         </View>
 
-        <Text style={styles.label}>Nhắc nhở</Text>
+        {/* NHẮC NHỞ */}
+        <Text style={styles.label}>Nhắc nhở trước hạn</Text>
+        <View style={styles.reminderRow}>
+          {[...PRESET_REMINDERS, CUSTOM].map(item => (
+            <Pressable
+              key={item}
+              onPress={() => {
+                setReminderChoice(item);
+                setError('');
+              }}
+              style={[
+                styles.reminderButton,
+                reminderChoice === item && styles.reminderActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.reminderText,
+                  reminderChoice === item && styles.reminderTextActive,
+                ]}
+              >
+                {item}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Ví dụ: 10 phút trước"
-          placeholderTextColor="#7FAF9F"
-          value={reminder}
-          onChangeText={setReminder}
-        />
+        {reminderChoice === CUSTOM && (
+          <View style={styles.customBox}>
+            <Text style={styles.customLabel}>Nhắc trước</Text>
+
+            <View style={styles.customRow}>
+              <TextInput
+                style={styles.customInput}
+                value={customAmount}
+                onChangeText={text => setCustomAmount(text.replace(/[^0-9]/g, ''))}
+                placeholder="Ví dụ: 45"
+                placeholderTextColor="#7FAF9F"
+                keyboardType="number-pad"
+                maxLength={4}
+              />
+
+              <View style={styles.unitRow}>
+                {UNITS.map(u => (
+                  <Pressable
+                    key={u}
+                    onPress={() => setCustomUnit(u)}
+                    style={[
+                      styles.unitButton,
+                      customUnit === u && styles.unitActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.unitText,
+                        customUnit === u && styles.unitTextActive,
+                      ]}
+                    >
+                      {u}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+
+            <Text style={styles.customHint}>
+              {customAmount
+                ? `Sẽ nhắc trước ${customAmount} ${customUnit} so với giờ hạn.`
+                : 'Nhập một số nguyên lớn hơn 0.'}
+            </Text>
+          </View>
+        )}
 
         {!!error && <Text style={styles.error}>{error}</Text>}
 
@@ -429,194 +575,117 @@ export default function AddDeadlineScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F4FBF8',
-  },
-
-  content: {
-    paddingHorizontal: 22,
-    paddingTop: 28,
-    paddingBottom: 35,
-  },
-
+  container: { flex: 1, backgroundColor: '#F4FBF8' },
+  content: { paddingHorizontal: 22, paddingTop: 14 },
   center: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#F4FBF8',
   },
+  text: { color: '#245747', fontSize: 15 },
 
-  text: {
-    color: '#245747',
-  },
-
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 25,
-  },
-
+  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
   backButton: {
-    paddingRight: 13,
-    paddingVertical: 4,
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    marginLeft: -6,
   },
+  back: { fontSize: 30, color: '#245747' },
+  headerTitle: { fontSize: 22, fontWeight: '700', color: '#245747' },
 
-  back: {
-    fontSize: 28,
-    color: '#245747',
-  },
-
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#245747',
-  },
-
-  label: {
-    fontSize: 11,
-    color: '#31594C',
-    marginBottom: 6,
-    marginTop: 5,
-  },
-
+  label: { fontSize: 14, color: '#31594C', marginBottom: 7, marginTop: 6 },
   input: {
-    height: 43,
+    height: 48,
     borderWidth: 1,
     borderColor: '#B9E5D5',
-    borderRadius: 9,
+    borderRadius: 12,
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 15,
+    paddingHorizontal: 16,
+    fontSize: 15,
     color: '#31594C',
     marginBottom: 14,
   },
-
-  row: {
-    flexDirection: 'row',
-    gap: 12,
-  },
+  row: { flexDirection: 'row', gap: 12 },
 
   dateButton: {
-    height: 43,
+    height: 48,
     borderWidth: 1,
     borderColor: '#B9E5D5',
-    borderRadius: 9,
+    borderRadius: 12,
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     marginBottom: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-
-  dateButtonText: {
-    color: '#568878',
-    fontSize: 12,
-  },
-
-  calendarIcon: {
-    color: '#35B979',
-    fontSize: 18,
-  },
+  dateButtonText: { color: '#31594C', fontSize: 15 },
+  calendarIcon: { color: '#35B979', fontSize: 20 },
 
   calendar: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#B9E5D5',
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 12,
     marginBottom: 16,
   },
-
   monthHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 12,
   },
-
   arrow: {
-    width: 34,
-    height: 34,
-    borderRadius: 9,
+    width: 40,
+    height: 40,
+    borderRadius: 10,
     backgroundColor: '#E4F7ED',
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  arrowText: {
-    color: '#245747',
-    fontSize: 25,
-  },
-
-  monthTitle: {
-    color: '#245747',
-    fontWeight: '700',
-    fontSize: 14,
-  },
-
-  weekRow: {
-    flexDirection: 'row',
-    marginBottom: 6,
-  },
-
+  arrowText: { color: '#245747', fontSize: 26 },
+  monthTitle: { color: '#245747', fontWeight: '700', fontSize: 16 },
+  weekRow: { flexDirection: 'row', marginBottom: 6 },
   weekday: {
     width: '14.2857%',
     textAlign: 'center',
     color: '#7B8C84',
-    fontSize: 10,
-  },
-
-  calendarGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-
-  dayCell: {
-    width: '14.2857%',
-    height: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 19,
-  },
-
-  dayText: {
-    fontSize: 12,
-    color: '#31594C',
-  },
-
-  selectedDay: {
-    backgroundColor: '#35B979',
-  },
-
-  selectedDayText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-
-  todayDay: {
-    borderWidth: 1,
-    borderColor: '#35B979',
-  },
-
-  todayDayText: {
-    color: '#20875B',
-    fontWeight: '700',
-  },
-
-  todayButton: {
-    marginTop: 10,
-    backgroundColor: '#E4F7ED',
-    borderRadius: 8,
-    padding: 10,
-    alignItems: 'center',
-  },
-
-  todayText: {
-    color: '#20875B',
     fontSize: 12,
     fontWeight: '600',
   },
+  calendarGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  dayCell: {
+    width: '14.2857%',
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 21,
+  },
+  dayText: { fontSize: 14, color: '#31594C' },
+  selectedDay: { backgroundColor: '#35B979' },
+  selectedDayText: { color: '#FFFFFF', fontWeight: '700' },
+  todayDay: { borderWidth: 1.5, borderColor: '#35B979' },
+  todayDayText: { color: '#20875B', fontWeight: '700' },
+  todayButton: {
+    marginTop: 10,
+    backgroundColor: '#E4F7ED',
+    borderRadius: 10,
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  todayText: { color: '#20875B', fontSize: 14, fontWeight: '600' },
+
+  wheelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  wheelColon: { fontSize: 28, fontWeight: '700', color: '#245747' },
 
   categoryRow: {
     flexDirection: 'row',
@@ -624,94 +693,109 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 14,
   },
-
   categoryButton: {
     flexGrow: 1,
-    flexBasis: '20%',
-    minHeight: 38,
-    paddingHorizontal: 10,
-    borderRadius: 20,
+    flexBasis: '40%',
+    minHeight: 44,
+    paddingHorizontal: 12,
+    borderRadius: 22,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#E4F1EB',
   },
+  categoryActive: { backgroundColor: '#35B979', borderColor: '#35B979' },
+  categoryText: { fontSize: 14, color: '#568878' },
+  categoryTextActive: { color: '#FFFFFF', fontWeight: '700' },
 
-  categoryActive: {
-    backgroundColor: '#35B979',
-    borderColor: '#35B979',
-  },
-
-  categoryText: {
-    fontSize: 11,
-    color: '#568878',
-  },
-
-  categoryTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-
-  priorityRow: {
-    flexDirection: 'row',
-    gap: 9,
-    marginBottom: 20,
-  },
-
+  priorityRow: { flexDirection: 'row', gap: 9, marginBottom: 14 },
   priorityButton: {
     flex: 1,
-    minHeight: 34,
-    borderRadius: 18,
+    minHeight: 44,
+    borderRadius: 22,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E4F1EB',
   },
+  priorityActive: { backgroundColor: '#35B979', borderColor: '#35B979' },
+  priorityText: { fontSize: 14, color: '#568878' },
+  priorityTextActive: { color: '#FFFFFF', fontWeight: '600' },
 
-  priorityActive: {
-    backgroundColor: '#35B979',
+  reminderRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 14,
   },
+  reminderButton: {
+    minHeight: 44,
+    paddingHorizontal: 18,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E4F1EB',
+  },
+  reminderActive: { backgroundColor: '#35B979', borderColor: '#35B979' },
+  reminderText: { fontSize: 14, color: '#568878' },
+  reminderTextActive: { color: '#FFFFFF', fontWeight: '600' },
 
-  priorityText: {
-    fontSize: 10,
-    color: '#568878',
+  customBox: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#B9E5D5',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 16,
   },
+  customLabel: { fontSize: 13, color: '#31594C', marginBottom: 8 },
+  customRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  customInput: {
+    width: 96,
+    height: 46,
+    borderWidth: 1,
+    borderColor: '#B9E5D5',
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    fontSize: 16,
+    color: '#31594C',
+    textAlign: 'center',
+  },
+  unitRow: { flex: 1, flexDirection: 'row', gap: 8 },
+  unitButton: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 10,
+    backgroundColor: '#F0F7F3',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unitActive: { backgroundColor: '#35B979' },
+  unitText: { fontSize: 14, color: '#568878' },
+  unitTextActive: { color: '#FFFFFF', fontWeight: '700' },
+  customHint: { fontSize: 12, color: '#84928E', marginTop: 10 },
 
-  priorityTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-  },
-
-  error: {
-    color: '#D84336',
-    fontSize: 12,
-    marginBottom: 12,
-  },
+  error: { color: '#D84336', fontSize: 14, marginBottom: 12 },
 
   saveButton: {
-    minHeight: 46,
+    minHeight: 52,
     backgroundColor: '#35B979',
-    borderRadius: 10,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 12,
   },
-
-  saveText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 13,
-  },
-
+  saveText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
   cancelButton: {
-    minHeight: 42,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 7,
+    marginTop: 6,
   },
-
-  cancelText: {
-    color: '#6F8B80',
-    fontSize: 12,
-  },
+  cancelText: { color: '#6F8B80', fontSize: 15 },
 });

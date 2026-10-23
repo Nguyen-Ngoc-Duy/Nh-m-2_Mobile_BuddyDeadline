@@ -1,21 +1,23 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { supabase } from '@/lib/supabase';
 import { notify } from '@/lib/notify';
+import { supabase } from '@/lib/supabase';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -28,26 +30,30 @@ export default function LoginScreen() {
     }
 
     setLoading(true);
-
     const { error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
       password,
     });
-
     setLoading(false);
 
     if (error) {
-      notify('Đăng nhập', 'Email hoặc mật khẩu chưa đúng.');
+      notify('Đăng nhập', error.message);
     }
     // Thành công: _layout tự chuyển sang /home
   };
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { paddingTop: insets.top }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.content}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: 24 + insets.bottom },
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.title}>Chào mừng trở lại! 👋</Text>
 
         <Text style={styles.subtitle}>
@@ -62,6 +68,7 @@ export default function LoginScreen() {
           onChangeText={setEmail}
           keyboardType="email-address"
           autoCapitalize="none"
+          autoCorrect={false}
         />
 
         <TextInput
@@ -71,6 +78,8 @@ export default function LoginScreen() {
           value={password}
           onChangeText={setPassword}
           secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
         />
 
         <Pressable
@@ -92,92 +101,67 @@ export default function LoginScreen() {
 
         <View style={styles.registerRow}>
           <Text style={styles.grayText}>Chưa có tài khoản? </Text>
-
           <Pressable onPress={() => router.push('/register')}>
             <Text style={styles.greenText}>Đăng ký ngay</Text>
           </Pressable>
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F4FBF8',
-  },
-
-  content: {
-    paddingHorizontal: 28,
-    paddingTop: 70,
-  },
+  container: { flex: 1, backgroundColor: '#F4FBF8' },
+  content: { paddingHorizontal: 28, paddingTop: 56 },
 
   title: {
     textAlign: 'center',
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: '700',
     color: '#245747',
   },
-
   subtitle: {
     textAlign: 'center',
-    marginTop: 6,
+    marginTop: 8,
     marginBottom: 36,
-    fontSize: 12,
+    fontSize: 14,
     color: '#65AA96',
   },
 
   input: {
-    height: 42,
+    height: 50,
     borderWidth: 1,
     borderColor: '#B9E5D5',
-    borderRadius: 9,
+    borderRadius: 12,
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 16,
-    marginBottom: 13,
+    marginBottom: 14,
+    fontSize: 15,
     color: '#245747',
   },
 
   forgot: {
     alignSelf: 'flex-end',
-    marginBottom: 27,
+    paddingVertical: 8,
+    marginBottom: 18,
   },
-
-  forgotText: {
-    color: '#20A96D',
-    fontSize: 11,
-    fontWeight: '600',
-  },
+  forgotText: { color: '#20A96D', fontSize: 14, fontWeight: '600' },
 
   button: {
-    height: 42,
+    height: 52,
     backgroundColor: '#35B979',
-    borderRadius: 9,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
-  },
+  buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
 
   registerRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 16,
+    alignItems: 'center',
+    marginTop: 18,
   },
-
-  grayText: {
-    color: '#84928E',
-    fontSize: 11,
-  },
-
-  greenText: {
-    color: '#20A96D',
-    fontSize: 11,
-    fontWeight: '600',
-  },
+  grayText: { color: '#84928E', fontSize: 14 },
+  greenText: { color: '#20A96D', fontSize: 14, fontWeight: '600' },
 });
